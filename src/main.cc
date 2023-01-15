@@ -12,6 +12,45 @@
 #include <octave/pt-idx.h>
 #include <octave/pt-stmt.h>
 
+#define todo()                                                                 \
+  do {                                                                         \
+    std::ostringstream msg;                                                    \
+    msg << "error: " << __FILE__ << ":" << __LINE__                            \
+        << ": not yet implemented";                                            \
+    throw std::runtime_error(msg.str());                                       \
+  } while (false)
+
+class tree_walker : public octave::tree_walker {
+public:
+  void visit_constant(octave::tree_constant &expr) override;
+  void visit_index_expression(octave::tree_index_expression &) override;
+
+private:
+  std::vector<octave_value> args;
+};
+
+void tree_walker::visit_constant(octave::tree_constant &expr) {
+  this->args.push_back(expr.value());
+}
+
+void tree_walker::visit_index_expression(
+    octave::tree_index_expression &expr) {
+  if (expr.name() != "disp") {
+    std::ostringstream msg;
+    msg << "'" << expr.name() << "' undefined near line " << expr.line()
+        << ", column " << expr.column();
+    throw std::runtime_error(msg.str());
+  }
+  assert(this->args.empty());
+  for (octave::tree_argument_list *arg_list : expr.arg_lists()) {
+    arg_list->accept(*this);
+  }
+  for (octave_value arg : this->args) {
+    std::cout << arg.string_value(true) << "\n";
+  }
+  this->args.clear();
+}
+
 static octave::interpreter interp;
 
 void init() {
@@ -29,23 +68,7 @@ void eval(rust::Str eval_str) {
   }
   std::shared_ptr<octave::tree_statement_list> stmt_list =
       parse.statement_list();
-  assert(stmt_list->length() == 1);
-  octave::tree_statement *stmt = stmt_list->front();
-  assert(stmt != nullptr);
-  octave::tree_expression *expr = stmt->expression();
-  assert(expr != nullptr);
-  octave::tree_index_expression &ie =
-      dynamic_cast<octave::tree_index_expression &>(*expr);
-  assert(ie.name() == "disp");
-  assert(ie.arg_lists().size() == 1);
-  octave::tree_argument_list *arg_list = ie.arg_lists().front();
-  assert(arg_list != nullptr);
-  assert(arg_list->size() == 1);
-  octave::tree_expression *arg_expr = arg_list->front();
-  assert(arg_expr != nullptr);
-  assert(arg_expr->is_constant());
-  octave::tree_constant *const_expr =
-      dynamic_cast<octave::tree_constant *>(arg_expr);
-  octave_value value = const_expr->value();
-  std::cout << value.string_value() << "\n";
+  tree_walker tw;
+  stmt_list->accept(tw);
+  return;
 }
