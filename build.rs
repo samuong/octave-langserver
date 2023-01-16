@@ -3,7 +3,7 @@ fn main() {
         .file("src/main.cc")
         .flag_if_supported("-std=c++14")
         .flag_if_supported("-I/usr/include/octave-7.2.0")
-        .compile("octave-language-server");
+        .compile("octave-langserver");
 
     println!("cargo:rerun-if-changed=src/main.cc");
     println!("cargo:rerun-if-changed=src/main.h");

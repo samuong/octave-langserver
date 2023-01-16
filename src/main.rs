@@ -3,7 +3,7 @@ use std::process;
 #[cxx::bridge]
 mod ffi {
     unsafe extern "C++" {
-        include!("octave-language-server/src/main.h");
+        include!("octave-langserver/src/main.h");
         fn init() -> Result<()>;
         fn eval(eval_str: &str) -> Result<()>;
     }
