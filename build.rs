@@ -1,7 +1,7 @@
 fn main() {
     cxx_build::bridge("src/main.rs")
         .file("src/main.cc")
-        .flag_if_supported("-std=c++14")
+        .flag_if_supported("-std=c++11")
         .flag_if_supported("-I/usr/include/octave-7.2.0")
         .compile("octave-langserver");
 

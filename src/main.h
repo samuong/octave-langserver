@@ -1,5 +1,5 @@
-#ifndef MAIN_H
-#define MAIN_H
+#if ! defined (main_h)
+#define main_h 1
 
 #include <memory>
 #include <string>
@@ -9,7 +9,7 @@
 
 #include "rust/cxx.h"
 
-void init();
-void eval(rust::Str eval_str);
+void init ();
+void eval (rust::Str eval_str);
 
 #endif

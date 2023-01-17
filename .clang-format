@@ -1,0 +1,5 @@
+# https://wiki.octave.org/C++_style_guide
+BasedOnStyle: GNU
+ColumnLimit: 79
+ReferenceAlignment: Left
+SpaceAfterLogicalNot: true
