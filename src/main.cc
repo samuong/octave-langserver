@@ -31,14 +31,14 @@ analyse (rust::Str text)
     {
       try
         {
-          std::cout << "parse.run()\n";
+          std::cerr << "parse.run()\n";
           int status = parse.run ();
-          std::cout << "parse status = " << status << "\n";
+          std::cerr << "parse status = " << status << "\n";
           std::shared_ptr<octave::tree_statement_list> stmt_list
               = parse.statement_list ();
           if (stmt_list == nullptr)
             continue;
-          std::cout << "stmt list length is " << stmt_list->size () << "\n";
+          std::cerr << "stmt list length is " << stmt_list->size () << "\n";
         }
       catch (const octave::execution_exception& e)
         {
@@ -53,11 +53,11 @@ analyse (rust::Str text)
   std::shared_ptr<octave::tree_statement_list> stmt_list
       = parse.statement_list ();
 
-  std::cout << "stmt list length is " << stmt_list->size () << "\n";
+  std::cerr << "stmt list length is " << stmt_list->size () << "\n";
 
   if (stmt_list)
     {
-      octave::tree_print_code print_code (std::cout, "> ");
+      octave::tree_print_code print_code (std::cerr, "> ");
       tree_walker print_symbols;
       stmt_list->accept (print_code);
       stmt_list->accept (print_symbols);

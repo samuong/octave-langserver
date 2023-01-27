@@ -18,7 +18,7 @@ static std::map<std::string, std::pair<uint32_t, uint32_t> > definitions;
 void
 add_symbol (uint32_t line, uint32_t character, const std::string& symbol)
 {
-  std::cout << "adding '" << symbol << "' at " << line << "," << character
+  std::cerr << "adding '" << symbol << "' at " << line << "," << character
             << "\n";
 
   auto result = symbols.emplace (line, std::map<uint32_t, std::string> ());
@@ -29,21 +29,21 @@ add_symbol (uint32_t line, uint32_t character, const std::string& symbol)
 bool
 find_symbol (uint32_t line, uint32_t character, std::string& symbol)
 {
-  std::cout << "finding symbol at '" << line << "," << character << "\n";
+  std::cerr << "finding symbol at '" << line << "," << character << "\n";
 
   if (symbols.find (line) == symbols.end ())
     {
-      std::cout << "no line\n";
+      std::cerr << "no line\n";
       return false;
     }
   for (const auto& entry : symbols[line])
     {
       uint32_t start = entry.first;
       uint32_t end = entry.first + entry.second.size ();
-      std::cout << "start=" << start << ", end=" << end << "\n";
+      std::cerr << "start=" << start << ", end=" << end << "\n";
       if (start <= character && character < end)
         {
-          std::cout << "found " << entry.second << "\n";
+          std::cerr << "found " << entry.second << "\n";
           symbol = entry.second;
           return true;
         }
@@ -72,7 +72,7 @@ find_definition (const std::string& symbol, uint32_t& line,
 void
 tree_walker::visit_anon_fcn_handle (octave::tree_anon_fcn_handle& afh)
 {
-  std::cout << "==> encountered anon-fcn-handle: at " << afh.line () << ":"
+  std::cerr << "==> encountered anon-fcn-handle: at " << afh.line () << ":"
             << afh.column () << "\n";
   octave::tree_parameter_list *params = afh.parameter_list ();
   if (params != nullptr)
@@ -88,7 +88,7 @@ tree_walker::visit_constant (octave::tree_constant& expr)
 void
 tree_walker::visit_decl_command (octave::tree_decl_command& decl)
 {
-  std::cout << "==> encountered decl-command: " << decl.name () << " at "
+  std::cerr << "==> encountered decl-command: " << decl.name () << " at "
             << decl.line () << ":" << decl.column () << "\n";
   octave::tree_decl_init_list *init_list = decl.initializer_list ();
   if (init_list != nullptr)
@@ -98,7 +98,7 @@ tree_walker::visit_decl_command (octave::tree_decl_command& decl)
 void
 tree_walker::visit_fcn_handle (octave::tree_fcn_handle& fh)
 {
-  std::cout << "==> encountered fcn-handle: " << fh.name () << " at "
+  std::cerr << "==> encountered fcn-handle: " << fh.name () << " at "
             << fh.line () << ":" << fh.column () << "\n";
   add_symbol (fh.line () - 1, fh.column () - 1, fh.name ());
 }
@@ -111,7 +111,7 @@ tree_walker::visit_function_def (octave::tree_function_def& def)
   octave_user_function *user_fcn = fcn.user_function_value ();
   assert (user_fcn != nullptr);
 
-  std::cout << "==> encountered function-def: " << user_fcn->name () << " at "
+  std::cerr << "==> encountered function-def: " << user_fcn->name () << " at "
             << def.line () << ":" << def.column () << " until "
             << user_fcn->ending_line () << ":" << user_fcn->ending_column ()
             << "\n";
@@ -129,10 +129,10 @@ tree_walker::visit_function_def (octave::tree_function_def& def)
 
   // TODO: what about the nested function bar()?
   /*
-  std::cout << "====> has subfunctions = " << user_fcn->has_subfunctions ()
+  std::cerr << "====> has subfunctions = " << user_fcn->has_subfunctions ()
             << "\n";
   for (auto name : user_fcn->subfunction_names ())
-    std::cout << "======> " << name << "\n";
+    std::cerr << "======> " << name << "\n";
     */
 
   octave_function *f = fcn.function_value ();
@@ -144,7 +144,7 @@ tree_walker::visit_function_def (octave::tree_function_def& def)
 void
 tree_walker::visit_identifier (octave::tree_identifier& id)
 {
-  std::cout << "==> encountered identifier: " << id.name () << " at "
+  std::cerr << "==> encountered identifier: " << id.name () << " at "
             << id.line () << ":" << id.column () << "\n";
 
   add_symbol (id.line () - 1, id.column () - 1, id.name ());
@@ -153,7 +153,7 @@ tree_walker::visit_identifier (octave::tree_identifier& id)
 void
 tree_walker::visit_index_expression (octave::tree_index_expression& expr)
 {
-  std::cout << "==> encountered index-expression: " << expr.name () << " at "
+  std::cerr << "==> encountered index-expression: " << expr.name () << " at "
             << expr.line () << ":" << expr.column () << "\n";
 
   add_symbol (expr.line () - 1, expr.column () - 1, expr.name ());
