@@ -1,80 +1,89 @@
 #include "main.h"
 
 #include <cassert>
-
 #include <iostream>
-#include <stdexcept>
 
-#include <octave/interpreter.h>
-#include <octave/parse.h>
-#include <octave/pt-arg-list.h>
-#include <octave/pt-const.h>
-#include <octave/pt-exp.h>
-#include <octave/pt-idx.h>
-#include <octave/pt-stmt.h>
+#include "octave/interpreter.h"
+#include "octave/parse.h"
+#include "octave/pt-pr-code.h"
+#include "octave/pt-stmt.h"
 
-#define todo()                                                                \
-  do                                                                          \
-    {                                                                         \
-      std::ostringstream msg;                                                 \
-      msg << "error: " << __FILE__ << ":" << __LINE__                         \
-          << ": not yet implemented";                                         \
-      throw std::runtime_error (msg.str ());                                  \
-    }                                                                         \
-  while (false)
-
-class tree_walker : public octave::tree_walker
-{
-public:
-  void visit_constant (octave::tree_constant& expr) override;
-  void visit_index_expression (octave::tree_index_expression&) override;
-
-private:
-  std::vector<octave_value> m_args;
-};
-
-void
-tree_walker::visit_constant (octave::tree_constant& expr)
-{
-  this->m_args.push_back (expr.value ());
-}
-
-void
-tree_walker::visit_index_expression (octave::tree_index_expression& expr)
-{
-  if (expr.name () != "disp")
-    {
-      std::ostringstream msg;
-      msg << "'" << expr.name () << "' undefined near line " << expr.line ()
-          << ", column " << expr.column ();
-      throw std::runtime_error (msg.str ());
-    }
-  assert (this->m_args.empty ());
-  for (octave::tree_argument_list *arg_list : expr.arg_lists ())
-    arg_list->accept (*this);
-  for (octave_value arg : this->m_args)
-    std::cout << arg.string_value (true) << "\n";
-  this->m_args.clear ();
-}
+#include "tree_walker.h"
 
 static octave::interpreter interp;
 
 void
 init ()
 {
+  std::cerr << "initializing...\n";
   interp.initialize ();
   if (! interp.initialized ())
     throw std::runtime_error ("Octave interpreter initialization failed!");
 }
 
 void
-eval (rust::Str eval_str)
+analyse (rust::Str text)
 {
-  octave::parser parse (std::string (eval_str.data ()), interp);
-  int status = parse.run ();
-  if (status != 0)
-    throw std::runtime_error ("parse error");
-  tree_walker tw;
-  parse.statement_list ()->accept (tw);
-  return;
+  std::string s (text.data (), text.size ());
+  octave::parser parse (s, interp);
+
+  do
+    {
+      try
+        {
+          std::cout << "parse.run()\n";
+          int status = parse.run ();
+          std::cout << "parse status = " << status << "\n";
+          std::shared_ptr<octave::tree_statement_list> stmt_list
+              = parse.statement_list ();
+          if (stmt_list == nullptr)
+            continue;
+          std::cout << "stmt list length is " << stmt_list->size () << "\n";
+        }
+      catch (const octave::execution_exception& e)
+        {
+          // TODO: capture parse errors and return to the client via
+          // textDocument.publishDiagnostics and textDocument.diagnostic.
+          e.display (std::cerr);
+          continue;
+        }
+    }
+  while (! parse.at_end_of_input ());
+
+  std::shared_ptr<octave::tree_statement_list> stmt_list
+      = parse.statement_list ();
+
+  std::cout << "stmt list length is " << stmt_list->size () << "\n";
+
+  if (stmt_list)
+    {
+      octave::tree_print_code print_code (std::cout, "> ");
+      tree_walker print_symbols;
+      stmt_list->accept (print_code);
+      stmt_list->accept (print_symbols);
+    }
+}
+
+rust::String
+symbol_at (uint32_t line, uint32_t character)
+{
+  std::string symbol;
+  if (! find_symbol (line, character, symbol))
+    throw std::runtime_error ("symbol not found");
+  return rust::String (symbol);
+}
+
+std::array<uint32_t, 2>
+definition (rust::Str symbol)
+{
+  uint32_t line, character;
+  if (! find_definition (std::string (symbol), line, character))
+    throw std::runtime_error ("definition not found");
+  return { line, character };
+}
+
+void
+clear_indexes ()
+{
+  clear ();
 }
