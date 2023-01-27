@@ -1,5 +1,5 @@
-#if ! defined(main_h)
-#define main_h 1
+#if ! defined(bridge_h)
+#define bridge_h 1
 
 #include "rust/cxx.h"
 
