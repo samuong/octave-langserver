@@ -24,6 +24,7 @@ init ()
 void
 analyse (rust::Str text)
 {
+  std::cerr << "analysing text of length " << text.size () << "\n";
   std::string s (text.data (), text.size ());
   octave::parser parse (s, interp);
 
