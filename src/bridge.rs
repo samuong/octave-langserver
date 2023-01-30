@@ -12,13 +12,14 @@ pub mod ffi {
     }
 }
 
-// TODO: figure out how to serialise tests (in code). For now, tests  need to be invoked using
-// `cargo test -- --test-threads=1`, otherwise the Octave interpreter will crash.
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    use serial_test::serial;
+
     #[test]
+    #[serial]
     fn test_symbol_at() -> Result<()> {
         ffi::init()?;
         ffi::analyse("msg = 'Hello, world!'\ndisp(msg)\n");
@@ -33,6 +34,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_goto_def() -> Result<()> {
         ffi::init()?;
         ffi::analyse(
