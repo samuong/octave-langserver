@@ -7,7 +7,7 @@ use lsp_server::Response;
 use lsp_types::DidOpenTextDocumentParams;
 use lsp_types::GotoDefinitionParams;
 
-use lsp_types::GotoDefinitionResponse;
+use lsp_types::GotoDefinitionResponse::Scalar;
 use lsp_types::InitializeParams;
 use lsp_types::InitializeResult;
 use lsp_types::OneOf;
@@ -17,13 +17,15 @@ use lsp_types::ServerInfo;
 use lsp_types::TextDocumentSyncKind;
 use lsp_types::TextDocumentSyncOptions;
 
+use std::time::Instant;
+
 fn main() {
     let (connection, io_threads) = Connection::stdio();
-    serve(connection);
+    serve(connection, None);
     io_threads.join().unwrap();
 }
 
-fn serve(connection: Connection) {
+fn serve(connection: Connection, deadline: Option<Instant>) {
     let initialize_result = serde_json::to_value(InitializeResult {
         capabilities: ServerCapabilities {
             definition_provider: Some(OneOf::Left(true)),
@@ -54,7 +56,11 @@ fn serve(connection: Connection) {
         connection.initialize_finish(id, initialize_result).unwrap();
     }
 
-    for msg in &connection.receiver {
+    loop {
+        let msg = match deadline {
+            None => connection.receiver.recv().unwrap(),
+            Some(d) => connection.receiver.recv_deadline(d).unwrap(),
+        };
         match msg {
             // TODO: this requires each handler to convert from a serde_json::Value to ...Params
             // themselves. is there a better way?
@@ -92,7 +98,7 @@ fn handle_gotodef(connection: &Connection, id: RequestId, params: serde_json::Va
             Position::new(pos[0], pos[1] + 1), // dodgy logic
         ),
     );
-    let result = Some(GotoDefinitionResponse::Scalar(loc));
+    let result = Some(Scalar(loc));
     // TODO: should return a InvalidParams error instead of unwrapping
     let result = serde_json::to_value(&result).unwrap();
     let resp = Response {
@@ -112,19 +118,100 @@ mod tests {
     use lsp_server::Notification;
     use lsp_server::Request;
 
-    use lsp_types::GotoDefinitionResponse::Scalar;
-    use lsp_types::InitializedParams;
-    use lsp_types::PartialResultParams;
-    use lsp_types::TextDocumentIdentifier;
-    use lsp_types::TextDocumentItem;
-    use lsp_types::TextDocumentPositionParams;
-    use lsp_types::Url;
-    use lsp_types::WorkDoneProgressParams;
+    use serde_json::json;
 
     use serial_test::serial;
 
     use std::thread;
+    use std::thread::JoinHandle;
     use std::time::Duration;
+
+    struct TestFixture {
+        next_id: i32,
+        connection: Connection,
+        server_thread: Option<JoinHandle<()>>,
+    }
+
+    impl TestFixture {
+        fn new() -> TestFixture {
+            let (client_side, server_side) = Connection::memory();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let server_thread = thread::spawn(move || serve(server_side, Some(deadline)));
+            TestFixture {
+                next_id: 0,
+                connection: client_side,
+                server_thread: Some(server_thread),
+            }
+        }
+
+        fn request(&mut self, method: &str, params: serde_json::Value) {
+            self.next_id += 1;
+            let req = Message::Request(Request {
+                id: RequestId::from(self.next_id),
+                method: method.to_string(),
+                params,
+            });
+            self.connection
+                .sender
+                .send_timeout(req, Duration::from_secs(1))
+                .unwrap();
+        }
+
+        fn notification(&mut self, method: &str, params: serde_json::Value) {
+            let note = Message::Notification(Notification {
+                method: method.to_string(),
+                params,
+            });
+            self.connection
+                .sender
+                .send_timeout(note, Duration::from_secs(1))
+                .unwrap();
+        }
+
+        fn response(&mut self) -> Message {
+            self.connection
+                .receiver
+                .recv_timeout(Duration::from_secs(1))
+                .unwrap()
+        }
+
+        fn setup(&mut self) {
+            self.request(&"initialize", json!({"capabilities": {}}));
+
+            match self.response() {
+                Message::Response(init_resp) => {
+                    assert_eq!(init_resp.id, RequestId::from(1));
+                    assert!(!init_resp.result.is_none());
+                    assert!(init_resp.error.is_none());
+                }
+                msg => panic!("got {msg:?}, wanted a response"),
+            }
+
+            self.notification("initialized", json!({}));
+        }
+
+        fn teardown(&mut self) {
+            self.request("shutdown", serde_json::Value::Null);
+
+            match self.response() {
+                Message::Response(shutdown_resp) => {
+                    assert_eq!(shutdown_resp.id, RequestId::from(3));
+                    assert!(!shutdown_resp.result.is_none());
+                    assert!(shutdown_resp.error.is_none());
+                }
+                msg => panic!("got {msg:?}, wanted a response"),
+            }
+
+            self.notification("exit", serde_json::Value::Null);
+        }
+    }
+
+    impl Drop for TestFixture {
+        fn drop(&mut self) {
+            self.server_thread.take().map(JoinHandle::join);
+            bridge::ffi::clear_indexes();
+        }
+    }
 
     // Run an in-process (language server client and server run as two threads, rather than
     // separate processes), in-memory (communication happens over an in-memory channel rather than
@@ -132,89 +219,30 @@ mod tests {
     #[test]
     #[serial]
     fn test_gotodef() {
-        // TODO:
-        // - look into https://docs.rs/expect-test/latest/expect_test/
-        // - look into https://docs.rs/serde_json/latest/serde_json/#constructing-json-values
-        // - automatically clean up after test runs
-        // - have common setup/teardown functions
-        let (client_side, server_side) = Connection::memory();
-        let server_thread = thread::spawn(move || serve(server_side));
-        let one_sec = Duration::from_secs(1);
+        let mut test = TestFixture::new();
+        test.setup();
 
-        let init_req = Message::Request(Request {
-            id: RequestId::from(1),
-            method: "initialize".to_string(),
-            params: serde_json::to_value(InitializeParams {
-                ..Default::default()
-            })
-            .unwrap(),
-        });
-        client_side.sender.send_timeout(init_req, one_sec).unwrap();
+        test.notification(
+            "textDocument/didOpen",
+            json!({
+                "textDocument": {
+                    "uri": "file:///inc.m",
+                    "languageId": "octave",
+                    "version": 1,
+                    "text": "function y = inc (x)\ny = x + 1;\nendfunction\ninc (0);\n",
+                }
+            }),
+        );
 
-        match client_side.receiver.recv_timeout(one_sec).unwrap() {
-            Message::Response(init_resp) => {
-                assert_eq!(init_resp.id, RequestId::from(1));
-                assert!(!init_resp.result.is_none());
-                assert!(init_resp.error.is_none());
-            }
-            msg => panic!("got {msg:?}, wanted a response"),
-        }
+        test.request(
+            "textDocument/definition",
+            json!({
+                "textDocument": {"uri": "file:///inc.m"},
+                "position": {"line": 3, "character": 0},
+            }),
+        );
 
-        let init_note = Message::Notification(Notification {
-            method: "initialized".to_string(),
-            params: serde_json::to_value(InitializedParams {}).unwrap(),
-        });
-        client_side.sender.send_timeout(init_note, one_sec).unwrap();
-
-        let did_open_note = Message::Notification(Notification {
-            method: "textDocument/didOpen".to_string(),
-            params: serde_json::to_value(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: Url::parse("file:///add.m").unwrap(),
-                    language_id: "octave".to_string(),
-                    version: 1,
-                    text: r#"
-function sum = add (augend, addend)
-    sum = augend + addend;
-endfunction
-f = @add;
-y = f (1, 2);
-"#
-                    .to_string(),
-                },
-            })
-            .unwrap(),
-        });
-        client_side
-            .sender
-            .send_timeout(did_open_note, one_sec)
-            .unwrap();
-
-        let goto_def_req = Message::Request(Request {
-            id: RequestId::from(2),
-            method: "textDocument/definition".to_string(),
-            params: serde_json::to_value(GotoDefinitionParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier::new(
-                        Url::parse("file:///add.m").unwrap(),
-                    ),
-                    position: Position::new(3, 5),
-                },
-                work_done_progress_params: WorkDoneProgressParams {
-                    work_done_token: None,
-                },
-                partial_result_params: PartialResultParams {
-                    partial_result_token: None,
-                },
-            })
-            .unwrap(),
-        });
-        client_side
-            .sender
-            .send_timeout(goto_def_req, one_sec)
-            .unwrap();
-
-        match client_side.receiver.recv_timeout(one_sec).unwrap() {
+        match test.response() {
             Message::Response(goto_def_resp) => {
                 assert_eq!(goto_def_resp.id, RequestId::from(2));
                 assert!(goto_def_resp.error.is_none());
@@ -224,39 +252,12 @@ y = f (1, 2);
                 let Scalar(location) = serde_json::from_value(value).unwrap() else {
                     panic!("it wasn't a scalar");
                 };
-                assert_eq!(location.uri.to_string(), "file:///add.m");
+                assert_eq!(location.uri.to_string(), "file:///inc.m");
                 assert_eq!(location.range.start, Position::new(0, 0));
             }
             msg => panic!("got {msg:?}, wanted a response"),
         }
 
-        let shutdown_req = Message::Request(Request {
-            id: RequestId::from(3),
-            method: "shutdown".to_string(),
-            params: serde_json::Value::Null,
-        });
-        client_side
-            .sender
-            .send_timeout(shutdown_req, one_sec)
-            .unwrap();
-
-        match client_side.receiver.recv_timeout(one_sec).unwrap() {
-            Message::Response(shutdown_resp) => {
-                assert_eq!(shutdown_resp.id, RequestId::from(3));
-                assert!(!shutdown_resp.result.is_none());
-                assert!(shutdown_resp.error.is_none());
-            }
-            msg => panic!("got {msg:?}, wanted a response"),
-        }
-
-        let exit_note = Message::Notification(Notification {
-            method: "exit".to_string(),
-            params: serde_json::Value::Null,
-        });
-        client_side.sender.send_timeout(exit_note, one_sec).unwrap();
-
-        server_thread.join().unwrap();
-
-        bridge::ffi::clear_indexes();
+        test.teardown();
     }
 }
