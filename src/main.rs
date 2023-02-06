@@ -1,13 +1,13 @@
 mod bridge;
 
 use lsp_server::Connection;
+use lsp_server::ErrorCode;
 use lsp_server::Message;
 use lsp_server::RequestId;
 use lsp_server::Response;
+
 use lsp_types::DidOpenTextDocumentParams;
 use lsp_types::GotoDefinitionParams;
-
-use lsp_types::GotoDefinitionResponse::Scalar;
 use lsp_types::InitializeParams;
 use lsp_types::InitializeResult;
 use lsp_types::OneOf;
@@ -17,7 +17,44 @@ use lsp_types::ServerInfo;
 use lsp_types::TextDocumentSyncKind;
 use lsp_types::TextDocumentSyncOptions;
 
+use std::error::Error;
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::time::Instant;
+
+#[derive(Debug)]
+struct HandlerError {
+    code: ErrorCode,
+    message: String,
+}
+
+impl HandlerError {
+    fn invalid_params(err: impl Error) -> HandlerError {
+        HandlerError {
+            code: ErrorCode::InvalidParams,
+            message: err.to_string(),
+        }
+    }
+
+    fn request_failed(err: impl Error) -> HandlerError {
+        HandlerError {
+            code: ErrorCode::RequestFailed,
+            message: err.to_string(),
+        }
+    }
+
+    fn into_response(self, id: RequestId) -> Response {
+        Response::new_err(id, self.code as i32, self.message)
+    }
+}
+
+impl Display for HandlerError {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(f, "{}: {}", self.code as i32, self.message)
+    }
+}
+
+impl Error for HandlerError {}
 
 fn main() {
     let (connection, io_threads) = Connection::stdio();
@@ -65,10 +102,19 @@ fn serve(connection: Connection, deadline: Option<Instant>) {
             // TODO: this requires each handler to convert from a serde_json::Value to ...Params
             // themselves. is there a better way?
             Message::Request(req) if connection.handle_shutdown(&req).unwrap() => break,
-            Message::Request(req) => match req.method.as_str() {
-                "textDocument/definition" => handle_gotodef(&connection, req.id, req.params),
-                _ => (),
-            },
+            Message::Request(req) => {
+                let resp = match req.method.as_str() {
+                    "textDocument/definition" => handle_gotodef(req.id.clone(), req.params),
+                    _ => {
+                        continue;
+                    }
+                };
+                let r = match resp {
+                    Ok(r) => r,
+                    Err(err) => err.into_response(req.id.clone()),
+                };
+                connection.sender.send(Message::Response(r)).unwrap();
+            }
             Message::Response(_resp) => {}
             Message::Notification(note) => match note.method.as_str() {
                 "textDocument/didOpen" => handle_didopen(note.params),
@@ -83,32 +129,24 @@ fn handle_didopen(params: serde_json::Value) {
     bridge::ffi::analyse(params.text_document.text.as_str());
 }
 
-fn handle_gotodef(connection: &Connection, id: RequestId, params: serde_json::Value) {
-    // TODO: return an InvalidParams response here
-    let params: GotoDefinitionParams = serde_json::from_value(params).unwrap();
-    let pos = &params.text_document_position_params.position;
-    // TODO: both of these should return RequestFailed error instead of unwrapping
-    let symbol = bridge::ffi::symbol_at(pos.line, pos.character).unwrap();
-    let pos = bridge::ffi::definition(symbol.as_str()).unwrap();
+fn handle_gotodef(id: RequestId, parameters: serde_json::Value) -> Result<Response, HandlerError> {
+    let params: GotoDefinitionParams =
+        serde_json::from_value(parameters).map_err(HandlerError::invalid_params)?;
+    let pos = params.text_document_position_params.position;
+    let symbol =
+        bridge::ffi::symbol_at(pos.line, pos.character).map_err(HandlerError::request_failed)?;
+    let pos = bridge::ffi::definition(symbol.as_str()).map_err(HandlerError::request_failed)?;
+    let start = Position::new(pos[0], pos[1]);
+    let end = Position::new(pos[0], pos[1] + 1); //dodgy logic
     let loc = lsp_types::Location::new(
         params.text_document_position_params.text_document.uri,
-        lsp_types::Range::new(
-            Position::new(pos[0], pos[1]),
-            //Position::new(pos[0], pos[1] + symbol.len() as u32), // dodgy logic
-            Position::new(pos[0], pos[1] + 1), // dodgy logic
-        ),
+        lsp_types::Range::new(start, end),
     );
-    let result = Some(Scalar(loc));
-    // TODO: should return a InvalidParams error instead of unwrapping
-    let result = serde_json::to_value(&result).unwrap();
-    let resp = Response {
+    Ok(Response {
         id,
-        result: Some(result),
+        result: Some(serde_json::to_value(loc).unwrap()),
         error: None,
-    };
-    eprintln!("sending gotoDefinition response: {resp:?}");
-    // TODO: should just panic if the connection is broken
-    connection.sender.send(Message::Response(resp)).unwrap();
+    })
 }
 
 #[cfg(test)]
@@ -117,6 +155,8 @@ mod tests {
 
     use lsp_server::Notification;
     use lsp_server::Request;
+
+    use lsp_types::GotoDefinitionResponse::Scalar;
 
     use serde_json::json;
 
