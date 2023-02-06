@@ -13,9 +13,9 @@
 static octave::interpreter interp;
 
 void
-init ()
+init (rust::Fn<void (rust::Str)> logger)
 {
-  std::cerr << "initializing...\n";
+  logger("initializing (from c++)...");
   interp.initialize ();
   if (! interp.initialized ())
     throw std::runtime_error ("Octave interpreter initialization failed!");

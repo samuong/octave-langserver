@@ -87,7 +87,7 @@ fn serve(connection: Connection, deadline: Option<Instant>) {
     .unwrap();
 
     {
-        bridge::ffi::init().unwrap();
+        bridge::ffi::init(|s| eprintln!("{s}")).unwrap();
         let (id, params) = connection.initialize_start().unwrap();
         let _initialize_params = serde_json::from_value::<InitializeParams>(params).unwrap();
         connection.initialize_finish(id, initialize_result).unwrap();
@@ -98,6 +98,7 @@ fn serve(connection: Connection, deadline: Option<Instant>) {
             None => connection.receiver.recv().unwrap(),
             Some(d) => connection.receiver.recv_deadline(d).unwrap(),
         };
+        eprintln!("{msg:?}");
         match msg {
             // TODO: this requires each handler to convert from a serde_json::Value to ...Params
             // themselves. is there a better way?
@@ -113,7 +114,9 @@ fn serve(connection: Connection, deadline: Option<Instant>) {
                     Ok(r) => r,
                     Err(err) => err.into_response(req.id.clone()),
                 };
-                connection.sender.send(Message::Response(r)).unwrap();
+                let msg = Message::Response(r);
+                eprintln!("{msg:?}");
+                connection.sender.send(msg).unwrap();
             }
             Message::Response(_resp) => {}
             Message::Notification(note) => match note.method.as_str() {

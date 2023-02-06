@@ -2,7 +2,7 @@
 pub mod ffi {
     unsafe extern "C++" {
         include!("octave-langserver/src/bridge.h");
-        fn init() -> Result<()>;
+        fn init(logger: fn(&str)) -> Result<()>;
         fn analyse(text: &str);
         fn symbol_at(line: u32, character: u32) -> Result<String>;
         fn definition(symbol: &str) -> Result<[u32; 2]>;
@@ -19,7 +19,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_symbol_at() {
-        ffi::init().unwrap();
+        ffi::init(|s| eprintln!("{s}")).unwrap();
         ffi::analyse("msg = 'Hello, world!'\ndisp(msg)\n");
         assert_eq!(ffi::symbol_at(0, 0).unwrap(), "msg");
         assert_eq!(ffi::symbol_at(1, 3).unwrap(), "disp");
@@ -33,7 +33,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_goto_def() {
-        ffi::init().unwrap();
+        ffi::init(|s| eprintln!("{s}")).unwrap();
         ffi::analyse(
             r#"
 function sum = add (augend, addend)
