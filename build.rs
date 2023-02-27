@@ -3,7 +3,7 @@ fn main() {
         .file("src/bridge.cc")
         .file("src/tree_walker.cc")
         .flag("-std=c++11")
-        .flag("-I/usr/include/octave-7.2.0")
+        .flag("-I/usr/include/octave-7.3.0")
         .compile("octave-langserver");
 
     println!("cargo:rerun-if-changed=src/bridge.cc");
@@ -14,5 +14,5 @@ fn main() {
     println!("cargo:rustc-link-lib=octave");
     println!("cargo:rustc-link-lib=octinterp");
     println!("cargo:rustc-link-lib=stdc++");
-    println!("cargo:rustc-link-search=/usr/lib64/octave/7.2.0");
+    println!("cargo:rustc-link-search=/usr/lib64/octave/7.3.0");
 }
