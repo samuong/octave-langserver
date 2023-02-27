@@ -9,65 +9,7 @@
 #include <octave/pt-fcn-handle.h>
 #include <octave/pt-idx.h>
 
-// line -> (character -> symbol)
-static std::map<uint32_t, std::map<uint32_t, std::string> > symbols;
-
-// symbol -> (line, character)
-static std::map<std::string, std::pair<uint32_t, uint32_t> > definitions;
-
-void
-add_symbol (uint32_t line, uint32_t character, const std::string& symbol)
-{
-  std::cerr << "adding '" << symbol << "' at " << line << "," << character
-            << "\n";
-
-  auto result = symbols.emplace (line, std::map<uint32_t, std::string> ());
-  assert (result.first->first == line);
-  result.first->second[character] = symbol;
-}
-
-bool
-find_symbol (uint32_t line, uint32_t character, std::string& symbol)
-{
-  std::cerr << "finding symbol at '" << line << "," << character << "\n";
-
-  if (symbols.find (line) == symbols.end ())
-    {
-      std::cerr << "no line\n";
-      return false;
-    }
-  for (const auto& entry : symbols[line])
-    {
-      uint32_t start = entry.first;
-      uint32_t end = entry.first + entry.second.size ();
-      std::cerr << "start=" << start << ", end=" << end << "\n";
-      if (start <= character && character < end)
-        {
-          std::cerr << "found " << entry.second << "\n";
-          symbol = entry.second;
-          return true;
-        }
-    }
-  return false;
-}
-
-void
-add_definition (const std::string& symbol, uint32_t line, uint32_t character)
-{
-  definitions[symbol] = std::make_pair (line, character);
-}
-
-bool
-find_definition (const std::string& symbol, uint32_t& line,
-                 uint32_t& character)
-{
-  auto it = definitions.find (symbol);
-  if (it == definitions.end ())
-    return false;
-  line = it->second.first;
-  character = it->second.second;
-  return true;
-}
+#include "octave-langserver/src/bridge.rs.h"
 
 void
 tree_walker::visit_anon_fcn_handle (octave::tree_anon_fcn_handle& afh)
@@ -100,7 +42,7 @@ tree_walker::visit_fcn_handle (octave::tree_fcn_handle& fh)
 {
   std::cerr << "==> encountered fcn-handle: " << fh.name () << " at "
             << fh.line () << ":" << fh.column () << "\n";
-  add_symbol (fh.line () - 1, fh.column () - 1, fh.name ());
+  this->m_index->add_symbol (fh.line () - 1, fh.column () - 1, fh.name ());
 }
 
 void
@@ -116,8 +58,8 @@ tree_walker::visit_function_def (octave::tree_function_def& def)
             << user_fcn->ending_line () << ":" << user_fcn->ending_column ()
             << "\n";
 
-  add_symbol (def.line () - 1, def.column () - 1, user_fcn->name ());
-  add_definition (user_fcn->name (), def.line () - 1, def.column () - 1);
+  this->m_index->add_symbol (def.line () - 1, def.column () - 1, user_fcn->name ());
+  this->m_index->add_definition (user_fcn->name (), def.line () - 1, def.column () - 1);
 
   octave::tree_parameter_list *outputs = user_fcn->return_list ();
   if (outputs != nullptr)
@@ -147,7 +89,7 @@ tree_walker::visit_identifier (octave::tree_identifier& id)
   std::cerr << "==> encountered identifier: " << id.name () << " at "
             << id.line () << ":" << id.column () << "\n";
 
-  add_symbol (id.line () - 1, id.column () - 1, id.name ());
+  this->m_index->add_symbol (id.line () - 1, id.column () - 1, id.name ());
 }
 
 void
@@ -156,16 +98,9 @@ tree_walker::visit_index_expression (octave::tree_index_expression& expr)
   std::cerr << "==> encountered index-expression: " << expr.name () << " at "
             << expr.line () << ":" << expr.column () << "\n";
 
-  add_symbol (expr.line () - 1, expr.column () - 1, expr.name ());
+  this->m_index->add_symbol (expr.line () - 1, expr.column () - 1, expr.name ());
 
   for (octave::tree_argument_list *arg_list : expr.arg_lists ())
     if (arg_list != nullptr)
       arg_list->accept (*this);
-}
-
-void
-clear ()
-{
-  symbols.clear ();
-  definitions.clear ();
 }

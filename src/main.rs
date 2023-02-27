@@ -1,5 +1,7 @@
 mod bridge;
 
+use crate::bridge::Index;
+
 use lsp_server::Connection;
 use lsp_server::ErrorCode;
 use lsp_server::Message;
@@ -36,10 +38,10 @@ impl HandlerError {
         }
     }
 
-    fn request_failed(err: impl Error) -> HandlerError {
+    fn request_failed(message: String) -> HandlerError {
         HandlerError {
             code: ErrorCode::RequestFailed,
-            message: err.to_string(),
+            message,
         }
     }
 
@@ -93,6 +95,7 @@ fn serve(connection: Connection, deadline: Option<Instant>) {
         connection.initialize_finish(id, initialize_result).unwrap();
     }
 
+    let mut index = Index::new();
     loop {
         let msg = match deadline {
             None => connection.receiver.recv().unwrap(),
@@ -105,7 +108,9 @@ fn serve(connection: Connection, deadline: Option<Instant>) {
             Message::Request(req) if connection.handle_shutdown(&req).unwrap() => break,
             Message::Request(req) => {
                 let resp = match req.method.as_str() {
-                    "textDocument/definition" => handle_gotodef(req.id.clone(), req.params),
+                    "textDocument/definition" => {
+                        handle_gotodef(req.id.clone(), req.params, &mut index)
+                    }
                     _ => {
                         continue;
                     }
@@ -119,28 +124,36 @@ fn serve(connection: Connection, deadline: Option<Instant>) {
                 connection.sender.send(msg).unwrap();
             }
             Message::Response(_resp) => {}
+            #[allow(clippy::single_match)]
             Message::Notification(note) => match note.method.as_str() {
-                "textDocument/didOpen" => handle_didopen(note.params),
+                "textDocument/didOpen" => handle_didopen(note.params, &mut index),
                 _ => (),
             },
         }
     }
 }
 
-fn handle_didopen(params: serde_json::Value) {
+fn handle_didopen(params: serde_json::Value, index: &mut Index) {
     let params: DidOpenTextDocumentParams = serde_json::from_value(params).unwrap();
-    bridge::ffi::analyse(params.text_document.text.as_str());
+    bridge::ffi::analyse(params.text_document.text.as_str(), index);
 }
 
-fn handle_gotodef(id: RequestId, parameters: serde_json::Value) -> Result<Response, HandlerError> {
+fn handle_gotodef(
+    id: RequestId,
+    parameters: serde_json::Value,
+    index: &mut Index,
+) -> Result<Response, HandlerError> {
     let params: GotoDefinitionParams =
         serde_json::from_value(parameters).map_err(HandlerError::invalid_params)?;
-    let pos = params.text_document_position_params.position;
-    let symbol =
-        bridge::ffi::symbol_at(pos.line, pos.character).map_err(HandlerError::request_failed)?;
-    let pos = bridge::ffi::definition(symbol.as_str()).map_err(HandlerError::request_failed)?;
-    let start = Position::new(pos[0], pos[1]);
-    let end = Position::new(pos[0], pos[1] + 1); //dodgy logic
+    let symbol_pos = params.text_document_position_params.position;
+    let Some(symbol) = index.find_symbol(symbol_pos.line, symbol_pos.character) else {
+        return Err(HandlerError::request_failed("symbol not found".to_string()));
+    };
+    let Some(&definition_pos) = index.find_definition(symbol.as_str()) else {
+        return Err(HandlerError::request_failed("definition not found".to_string()));
+    };
+    let start = Position::new(definition_pos.0, definition_pos.1);
+    let end = Position::new(definition_pos.0, definition_pos.1 + 1); //dodgy logic
     let loc = lsp_types::Location::new(
         params.text_document_position_params.text_document.uri,
         lsp_types::Range::new(start, end),
@@ -252,7 +265,6 @@ mod tests {
     impl Drop for TestFixture {
         fn drop(&mut self) {
             self.server_thread.take().map(JoinHandle::join);
-            bridge::ffi::clear_indexes();
         }
     }
 

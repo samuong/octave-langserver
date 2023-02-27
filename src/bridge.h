@@ -3,10 +3,9 @@
 
 #include "rust/cxx.h"
 
+#include "octave-langserver/src/bridge.rs.h"
+
 void init (rust::Fn<void (rust::Str)> logger);
-void analyse (rust::Str text);
-rust::String symbol_at (uint32_t line, uint32_t character);
-std::array<uint32_t, 2> definition (rust::Str symbol);
-void clear_indexes ();
+void analyse (rust::Str text, Index& index);
 
 #endif

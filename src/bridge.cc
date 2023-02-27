@@ -3,10 +3,10 @@
 #include <cassert>
 #include <iostream>
 
-#include "octave/interpreter.h"
-#include "octave/parse.h"
-#include "octave/pt-pr-code.h"
-#include "octave/pt-stmt.h"
+#include <octave/interpreter.h>
+#include <octave/parse.h>
+#include <octave/pt-pr-code.h>
+#include <octave/pt-stmt.h>
 
 #include "tree_walker.h"
 
@@ -22,7 +22,7 @@ init (rust::Fn<void (rust::Str)> logger)
 }
 
 void
-analyse (rust::Str text)
+analyse (rust::Str text, Index& index)
 {
   std::cerr << "analysing text of length " << text.size () << "\n";
   std::string s (text.data (), text.size ());
@@ -59,32 +59,8 @@ analyse (rust::Str text)
   if (stmt_list)
     {
       octave::tree_print_code print_code (std::cerr, "> ");
-      tree_walker print_symbols;
+      tree_walker print_symbols(&index);
       stmt_list->accept (print_code);
       stmt_list->accept (print_symbols);
     }
-}
-
-rust::String
-symbol_at (uint32_t line, uint32_t character)
-{
-  std::string symbol;
-  if (! find_symbol (line, character, symbol))
-    throw std::runtime_error ("symbol not found");
-  return rust::String (symbol);
-}
-
-std::array<uint32_t, 2>
-definition (rust::Str symbol)
-{
-  uint32_t line, character;
-  if (! find_definition (std::string (symbol), line, character))
-    throw std::runtime_error ("definition not found");
-  return { line, character };
-}
-
-void
-clear_indexes ()
-{
-  clear ();
 }
